@@ -12,10 +12,10 @@ public class GameLogic {
     private final GameState gameState = GameState.getInstance();
 
     public String handleMessage(String message, SocketChannel client) {
-        System.out.println("Received message: " + message);
+        //System.out.println("Received message: " + message);
 
-        Pattern movePattern = Pattern.compile("MOVE;id:(\\d+);x:(\\d+),y:(\\d+)");
-        Pattern newPlayerPattern = Pattern.compile("NEW_PLAYER;id:(\\d+)");
+        Pattern movePattern = Pattern.compile("MOVE;id:([\\w-]+);x:(\\d+),y:(\\d+)");
+        Pattern newPlayerPattern = Pattern.compile("NEW_PLAYER;id:([\\w-]+)");
 
         Matcher moveMatcher = movePattern.matcher(message.trim());
         Matcher newPlayerMatcher = newPlayerPattern.matcher(message.trim());
@@ -31,7 +31,7 @@ public class GameLogic {
                 player.setX(x);
                 player.setY(y);
                 gameState.updatePlayer(playerId, player);
-                System.out.println("Player " + playerId + " moved to x: " + x + ", y: " + y);
+                //System.out.println("Player " + playerId + " moved to x: " + x + ", y: " + y);
             } else {
                 System.out.println("Player not found: " + playerId);
             }
@@ -47,5 +47,9 @@ public class GameLogic {
         }
 
         return null;
+    }
+
+    public void removePlayer(String playerId) {
+        gameState.removePlayer(playerId);
     }
 }

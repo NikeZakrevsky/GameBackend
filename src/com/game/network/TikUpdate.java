@@ -1,5 +1,11 @@
 package com.game.network;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.game.state.GameState;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
@@ -16,12 +22,23 @@ public class TikUpdate implements Runnable {
 
     @Override
     public void run() {
-        broadcast("qwe");
+        //System.out.println("TikUpdate started");
+        PlayersMessage playersMessage = new PlayersMessage(GameState.getInstance().getPlayers().values());
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            String json = mapper.writeValueAsString(playersMessage);
+            broadcast(json);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        //System.out.println("TikUpdate finished");
     }
 
     private void broadcast(String message) {
-        ByteBuffer byteBuffer = messageEncodeDecodeService.encodeMessage(message);
+
         for (SocketChannel client : clients.values()) {
+            ByteBuffer byteBuffer = messageEncodeDecodeService.encodeMessage(message);
             if (client.isOpen()) {
                 try {
                     // Отправляем данные в канал

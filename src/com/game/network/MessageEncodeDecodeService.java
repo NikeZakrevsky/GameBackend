@@ -15,7 +15,6 @@ public class MessageEncodeDecodeService {
         b = buffer.get();
         boolean isMasked = (b & 0x80) != 0; // Mask bit
         int payloadLength = b & 0x7F; // Payload length
-
         // Handle payload length for cases greater than 125
         if (payloadLength == 126) {
             payloadLength = buffer.getShort() & 0xFFFF; // Read next two bytes
@@ -48,29 +47,32 @@ public class MessageEncodeDecodeService {
     public ByteBuffer encodeMessage(String message) {
         byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
-        // Вычисляем длину сообщения
+        // Calculate the length of the message
         int messageLength = messageBytes.length;
         ByteBuffer buffer;
 
-        // Определяем размер буфера в зависимости от длины сообщения
+        // Determine the size of the buffer based on the length of the message
         if (messageLength <= 125) {
+            // 1 byte for the control byte + 1 byte for the length + message length
             buffer = ByteBuffer.allocate(1 + 1 + messageLength);
-            buffer.put((byte) 0x81); // FIN + текстовый фрейм
-            buffer.put((byte) messageLength); // Длина сообщения
+            buffer.put((byte) 0x81); // FIN + text frame
+            buffer.put((byte) messageLength); // Length of the message
         } else if (messageLength >= 126 && messageLength <= 65535) {
-            buffer = ByteBuffer.allocate(1 + 2 + messageLength);
-            buffer.put((byte) 0x81); // FIN + текстовый фрейм
-            buffer.put((byte) 126); // длина сообщения больше 125, но меньше 65536
-            buffer.putShort((short) messageLength); // 2 байта для длины
+            // 1 byte for the control byte + 1 byte for the extended length + 2 bytes for the length + message length
+            buffer = ByteBuffer.allocate(1 + 1 + 2 + messageLength);
+            buffer.put((byte) 0x81); // FIN + text frame
+            buffer.put((byte) 126); // Length is 126 or more but less than 65536
+            buffer.putShort((short) messageLength); // 2 bytes for the length
         } else {
-            buffer = ByteBuffer.allocate(1 + 8 + messageLength);
-            buffer.put((byte) 0x81); // FIN + текстовый фрейм
-            buffer.put((byte) 127); // длина сообщения больше 65535
-            buffer.putLong(messageLength); // 8 байт для длины
+            // 1 byte for the control byte + 1 byte for the extended length + 8 bytes for the length + message length
+            buffer = ByteBuffer.allocate(1 + 1 + 8 + messageLength);
+            buffer.put((byte) 0x81); // FIN + text frame
+            buffer.put((byte) 127); // Length is greater than 65535
+            buffer.putLong(messageLength); // 8 bytes for the length
         }
 
-        buffer.put(messageBytes); // Содержимое сообщения
-        buffer.flip(); // Подготовка к записи
+        buffer.put(messageBytes); // Message content
+        buffer.flip(); // Prepare for writing
 
         return buffer;
     }

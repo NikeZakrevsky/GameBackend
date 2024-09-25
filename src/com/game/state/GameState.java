@@ -23,7 +23,7 @@ public class GameState {
 
     // Add a player to the game state
     public String addPlayer(String playerId) {
-        players.put(playerId, new Player());
+        players.put(playerId, new Player(playerId));
 
         return playerId;
     }

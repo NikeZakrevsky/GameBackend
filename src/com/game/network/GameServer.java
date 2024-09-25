@@ -47,12 +47,11 @@ public class GameServer {
     public void start() {
         new Thread(this::acceptConnections).start();
         new Thread(this::processWorkerEvents).start();
-        //startTikUpdate();
+        startTikUpdate();
     }
 
     private void startTikUpdate() {
-        // Создаем задачу, которая будет выполняться каждые 50мс
-        scheduler.scheduleAtFixedRate(new TikUpdate(playerToClientMap), 0, 50, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(new TikUpdate(playerToClientMap), 0, 16, TimeUnit.MILLISECONDS);
     }
 
     // Поток для принятия соединений
@@ -102,32 +101,36 @@ public class GameServer {
                         if (key.isReadable()) {
                             SocketChannel client = (SocketChannel) key.channel();
                             ByteBuffer buffer = clientBuffers.get(client);
-                            try {
-                                int bytesRead = client.read(buffer);
-                                if (bytesRead == -1) {
-                                    System.out.println("Client disconnected: " + client.getRemoteAddress());
-                                    clientBuffers.remove(client);
-                                    String playerId = clientToPlayerMap.get(client);
-                                    SocketChannel removedClient = playerToClientMap.remove(playerId);
-                                    removedClient.close();
-                                    clientToPlayerMap.remove(client);
-                                    client.close();
-                                    continue;
-                                }
+                            if (buffer != null) {
+                                try {
+                                    int bytesRead = client.read(buffer);
+                                    if (bytesRead == -1) {
+                                        clientBuffers.remove(client);
+                                        String playerId = clientToPlayerMap.get(client);
+                                        if (playerId != null) {
+                                            SocketChannel removedClient = playerToClientMap.remove(playerId);
+                                            removedClient.close();
+                                            clientToPlayerMap.remove(client);
+                                            client.close();
+                                            gameLogic.removePlayer(playerId);
+                                        }
+                                        continue;
+                                    }
 
-                                // Обработка сообщения от клиента
-                                buffer.flip();
-                                String message = messageEncodeDecodeService.decodeMessage(buffer);
-                                buffer.clear();
+                                    // Обработка сообщения от клиента
+                                    buffer.flip();
+                                    String message = messageEncodeDecodeService.decodeMessage(buffer);
+                                    buffer.clear();
 
-                                //workerPool.submit(() -> gameLogic.handleMessage(message, client)); // Обработка в отдельном потоке
-                                String playerId = gameLogic.handleMessage(message, client);
-                                if (playerId != null) {
-                                    playerToClientMap.put(playerId, client);
-                                    clientToPlayerMap.put(client, playerId);
+                                    //workerPool.submit(() -> gameLogic.handleMessage(message, client)); // Обработка в отдельном потоке
+                                    String playerId = gameLogic.handleMessage(message, client);
+                                    if (playerId != null) {
+                                        playerToClientMap.put(playerId, client);
+                                        clientToPlayerMap.put(client, playerId);
+                                    }
+                                } catch (IOException e) {
+                                    e.printStackTrace();
                                 }
-                            } catch (IOException e) {
-                                e.printStackTrace();
                             }
                         }
                         iterator.remove();
