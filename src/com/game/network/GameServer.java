@@ -120,7 +120,6 @@ public class GameServer {
                                 String message = messageEncodeDecodeService.decodeMessage(buffer);
                                 buffer.clear();
 
-                                System.out.println("Received message: " + message);
                                 //workerPool.submit(() -> gameLogic.handleMessage(message, client)); // Обработка в отдельном потоке
                                 String playerId = gameLogic.handleMessage(message, client);
                                 if (playerId != null) {
