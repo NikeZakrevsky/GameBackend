@@ -1,10 +1,8 @@
 package com.game.network;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.game.state.GameState;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectWriter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -14,9 +12,9 @@ import java.util.Map;
 public class TikUpdate implements Runnable {
 
     private final MessageEncodeDecodeService messageEncodeDecodeService = new MessageEncodeDecodeService();
-    private final Map<String, SocketChannel> clients; // Поле для клиентов
+    private final Map<SocketChannel, ClientInfo> clients; // Поле для клиентов
 
-    public TikUpdate(Map<String, SocketChannel> clients) {
+    public TikUpdate(Map<SocketChannel, ClientInfo> clients) {
         this.clients = clients; // Передаем клиентов через конструктор
     }
 
@@ -37,7 +35,7 @@ public class TikUpdate implements Runnable {
 
     private void broadcast(String message) {
 
-        for (SocketChannel client : clients.values()) {
+        for (SocketChannel client : clients.keySet()) {
             ByteBuffer byteBuffer = messageEncodeDecodeService.encodeMessage(message);
             if (client.isOpen()) {
                 try {

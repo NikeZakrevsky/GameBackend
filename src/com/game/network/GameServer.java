@@ -11,6 +11,7 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.Base64;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class GameServer {
     private static final String MAGIC_NUMBER = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -18,15 +19,10 @@ public class GameServer {
     private final Selector workerSelector;
     private final ServerSocketChannel serverSocketChannel;
     private final ExecutorService workerPool;
-    private final Map<SocketChannel, ByteBuffer> clientBuffers = new ConcurrentHashMap<>(); // Буферы для чтения от каждого клиента
     private final GameLogic gameLogic;
-    private final Set<SocketChannel> clients = ConcurrentHashMap.newKeySet(); // Потокобезопасное множество клиентов
     private final MessageEncodeDecodeService messageEncodeDecodeService;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-
-    private final Map<String, SocketChannel> playerToClientMap = new ConcurrentHashMap<>();
-    private final Map<SocketChannel, String> clientToPlayerMap = new ConcurrentHashMap<>();
-
+    private final Map<SocketChannel, ClientInfo> clientInfoMap = new ConcurrentHashMap<>();
 
     public GameServer(int port) throws IOException {
         bossSelector = Selector.open();
@@ -51,7 +47,7 @@ public class GameServer {
     }
 
     private void startTikUpdate() {
-        scheduler.scheduleAtFixedRate(new TikUpdate(playerToClientMap), 0, 16, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(new TikUpdate(clientInfoMap), 0, 16, TimeUnit.MILLISECONDS);
     }
 
     // Поток для принятия соединений
@@ -59,6 +55,7 @@ public class GameServer {
         while (true) {
             try {
                 if (bossSelector.select() > 0) {
+                    System.out.println("NEW CLIENT");
                     Set<SelectionKey> selectedKeys = bossSelector.selectedKeys();
                     Iterator<SelectionKey> iterator = selectedKeys.iterator();
 
@@ -66,7 +63,21 @@ public class GameServer {
                         SelectionKey key = iterator.next();
                         if (key.isAcceptable()) {
                             SocketChannel client = serverSocketChannel.accept();
+                            System.out.println("Client connecting " + client.getRemoteAddress());
                             client.configureBlocking(false);
+
+                            System.out.println(clientInfoMap.size());
+                            for (Map.Entry<SocketChannel, ClientInfo> socketChannelClientInfoEntry : clientInfoMap.entrySet()) {
+                                System.out.println(socketChannelClientInfoEntry);
+                            }
+
+                            if (clientInfoMap.containsKey(client) && !clientInfoMap.get(client).isActive()) {
+                                System.out.println("Client is already connecting or disconnecting");
+                                continue; // Игнорируем подключение
+                            }
+
+                            ClientInfo clientInfo = new ClientInfo(client);
+                            clientInfoMap.put(client, clientInfo); // Устанавливаем активное состояние
 
                             String request = readHttpRequest(client);
                             handleHandshake(client, request);
@@ -74,7 +85,7 @@ public class GameServer {
                             // Регистрируем клиента для чтения
                             client.register(workerSelector, SelectionKey.OP_READ);
                             workerSelector.wakeup();
-                            clientBuffers.put(client, ByteBuffer.allocate(1024)); // Выделяем буфер для каждого клиента
+                            //clientBuffers.put(client, ByteBuffer.allocate(1024)); // Выделяем буфер для каждого клиента
 
                             System.out.println("Client connected: " + client.getRemoteAddress());
                         }
@@ -82,6 +93,7 @@ public class GameServer {
                     }
                 }
             } catch (IOException e) {
+                System.out.println("Error");
                 e.printStackTrace();
             }
         }
@@ -92,7 +104,6 @@ public class GameServer {
         while (true) {
             try {
                 if (workerSelector.select() > 0) {
-
                     Set<SelectionKey> selectedKeys = workerSelector.selectedKeys();
                     Iterator<SelectionKey> iterator = selectedKeys.iterator();
 
@@ -100,20 +111,14 @@ public class GameServer {
                         SelectionKey key = iterator.next();
                         if (key.isReadable()) {
                             SocketChannel client = (SocketChannel) key.channel();
-                            ByteBuffer buffer = clientBuffers.get(client);
-                            if (buffer != null) {
+                            ClientInfo clientInfo = clientInfoMap.get(client);
+                            if (clientInfo != null && clientInfo.isActive()) {
+                                ByteBuffer buffer = clientInfo.getBuffer();
                                 try {
                                     int bytesRead = client.read(buffer);
                                     if (bytesRead == -1) {
-                                        clientBuffers.remove(client);
-                                        String playerId = clientToPlayerMap.get(client);
-                                        if (playerId != null) {
-                                            SocketChannel removedClient = playerToClientMap.remove(playerId);
-                                            removedClient.close();
-                                            clientToPlayerMap.remove(client);
-                                            client.close();
-                                            gameLogic.removePlayer(playerId);
-                                        }
+                                        System.out.println("Dis byte");
+                                        handleClientDisconnect(client);
                                         continue;
                                     }
 
@@ -122,14 +127,12 @@ public class GameServer {
                                     String message = messageEncodeDecodeService.decodeMessage(buffer);
                                     buffer.clear();
 
-                                    //workerPool.submit(() -> gameLogic.handleMessage(message, client)); // Обработка в отдельном потоке
-                                    String playerId = gameLogic.handleMessage(message, client);
-                                    if (playerId != null) {
-                                        playerToClientMap.put(playerId, client);
-                                        clientToPlayerMap.put(client, playerId);
-                                    }
+                                    // Здесь выполняем обработку сообщения
+                                    gameLogic.handleMessage(message, client, clientInfo);
                                 } catch (IOException e) {
+                                    System.out.println("Error");
                                     e.printStackTrace();
+                                    handleClientDisconnect(client);
                                 }
                             }
                         }
@@ -137,8 +140,32 @@ public class GameServer {
                     }
                 }
             } catch (IOException e) {
+                System.out.println("Error");
                 e.printStackTrace();
             }
+        }
+    }
+
+    private void handleClientDisconnect(SocketChannel client) {
+        try {
+            System.out.println("Client disconnect: " + client.getRemoteAddress());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        ClientInfo clientInfo = clientInfoMap.remove(client);
+        if (clientInfo.getPlayerId() != null) {
+            gameLogic.removePlayer(clientInfo.getPlayerId());
+        }
+        System.out.println("Client removed " + clientInfoMap.size());
+        if (clientInfo != null) {
+            clientInfo.setActive(false);
+            // Дополнительная логика отключения, если нужно
+        }
+        try {
+            client.close();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 

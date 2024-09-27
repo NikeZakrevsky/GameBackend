@@ -1,5 +1,6 @@
 package com.game.logic;
 
+import com.game.network.ClientInfo;
 import com.game.state.GameState;
 import com.game.state.Player;
 
@@ -11,9 +12,7 @@ public class GameLogic {
 
     private final GameState gameState = GameState.getInstance();
 
-    public String handleMessage(String message, SocketChannel client) {
-        //System.out.println("Received message: " + message);
-
+    public String handleMessage(String message, SocketChannel client, ClientInfo clientInfo) {
         Pattern movePattern = Pattern.compile("MOVE;id:([\\w-]+);x:(\\d+),y:(\\d+)");
         Pattern newPlayerPattern = Pattern.compile("NEW_PLAYER;id:([\\w-]+)");
 
@@ -39,6 +38,7 @@ public class GameLogic {
         // Обработка команды NEW_PLAYER
         else if (newPlayerMatcher.matches()) {
             String playerId = newPlayerMatcher.group(1);
+            clientInfo.setPlayerId(playerId);
             return gameState.addPlayer(playerId);
         }
         else {
