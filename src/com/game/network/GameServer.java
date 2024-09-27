@@ -89,6 +89,7 @@ public class GameServer {
                         if (key.isReadable()) {
                             SocketChannel channel = (SocketChannel) key.channel();
                             ByteBuffer buffer = ByteBuffer.allocate(2048);
+
                             int count = channel.read(buffer);
                             buffer.flip();
 
@@ -112,9 +113,14 @@ public class GameServer {
                                 if (count == -1) {
                                     handleClientDisconnect(channel);
                                 } else {
-                                    String message = messageEncodeDecodeService.decodeMessage(buffer);
-                                    ClientInfo clientInfo = clientInfoMap.get(channel);
-                                    gameLogic.handleMessage(message, channel, clientInfo);
+                                    try {
+                                        String message = messageEncodeDecodeService.decodeMessage(buffer);
+                                        System.out.println(message);
+                                        ClientInfo clientInfo = clientInfoMap.get(channel);
+                                        gameLogic.handleMessage(message, channel, clientInfo);
+                                    } catch (Exception e) {
+                                        System.out.println("Can not decode");
+                                    }
                                 }
                             }
                             iterator.remove();
