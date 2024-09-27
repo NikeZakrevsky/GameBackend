@@ -11,7 +11,6 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.Base64;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public class GameServer {
     private static final String MAGIC_NUMBER = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -35,7 +34,7 @@ public class GameServer {
         serverSocketChannel.bind(new InetSocketAddress(port));
         serverSocketChannel.register(bossSelector, SelectionKey.OP_ACCEPT);
 
-        workerPool = Executors.newFixedThreadPool(10); // Количество потоков для обработки сообщений
+        workerPool = Executors.newFixedThreadPool(10);
 
         System.out.println("Game Server started on port " + port);
     }
@@ -55,51 +54,29 @@ public class GameServer {
         while (true) {
             try {
                 if (bossSelector.select() > 0) {
-                    System.out.println("NEW CLIENT");
                     Set<SelectionKey> selectedKeys = bossSelector.selectedKeys();
                     Iterator<SelectionKey> iterator = selectedKeys.iterator();
 
                     while (iterator.hasNext()) {
                         SelectionKey key = iterator.next();
                         if (key.isAcceptable()) {
-                            SocketChannel client = serverSocketChannel.accept();
-                            System.out.println("Client connecting " + client.getRemoteAddress());
-                            client.configureBlocking(false);
-
-                            System.out.println(clientInfoMap.size());
-                            for (Map.Entry<SocketChannel, ClientInfo> socketChannelClientInfoEntry : clientInfoMap.entrySet()) {
-                                System.out.println(socketChannelClientInfoEntry);
+                            SocketChannel channel = serverSocketChannel.accept();
+                            if (channel != null) {
+                                channel.configureBlocking(false);
+                                channel.register(workerSelector, SelectionKey.OP_READ);
+                                workerSelector.wakeup();
                             }
-
-                            if (clientInfoMap.containsKey(client) && !clientInfoMap.get(client).isActive()) {
-                                System.out.println("Client is already connecting or disconnecting");
-                                continue; // Игнорируем подключение
-                            }
-
-                            ClientInfo clientInfo = new ClientInfo(client);
-                            clientInfoMap.put(client, clientInfo); // Устанавливаем активное состояние
-
-                            String request = readHttpRequest(client);
-                            handleHandshake(client, request);
-
-                            // Регистрируем клиента для чтения
-                            client.register(workerSelector, SelectionKey.OP_READ);
-                            workerSelector.wakeup();
-                            //clientBuffers.put(client, ByteBuffer.allocate(1024)); // Выделяем буфер для каждого клиента
-
-                            System.out.println("Client connected: " + client.getRemoteAddress());
                         }
                         iterator.remove();
                     }
                 }
             } catch (IOException e) {
-                System.out.println("Error");
+                System.out.println("Error in accepting connections:");
                 e.printStackTrace();
             }
         }
     }
 
-    // Поток для обработки чтения данных с клиентов
     private void processWorkerEvents() {
         while (true) {
             try {
@@ -110,37 +87,42 @@ public class GameServer {
                     while (iterator.hasNext()) {
                         SelectionKey key = iterator.next();
                         if (key.isReadable()) {
-                            SocketChannel client = (SocketChannel) key.channel();
-                            ClientInfo clientInfo = clientInfoMap.get(client);
-                            if (clientInfo != null && clientInfo.isActive()) {
-                                ByteBuffer buffer = clientInfo.getBuffer();
-                                try {
-                                    int bytesRead = client.read(buffer);
-                                    if (bytesRead == -1) {
-                                        System.out.println("Dis byte");
-                                        handleClientDisconnect(client);
-                                        continue;
-                                    }
+                            SocketChannel channel = (SocketChannel) key.channel();
+                            ByteBuffer buffer = ByteBuffer.allocate(2048);
+                            int count = channel.read(buffer);
+                            buffer.flip();
 
-                                    // Обработка сообщения от клиента
-                                    buffer.flip();
+                            String string = new String(buffer.array());
+                            if (string.startsWith("GET / HTTP/1.1")) {
+                                int swkIndex = string.indexOf("Sec-WebSocket-Key:");
+                                int endIndex = string.indexOf("\r\n", swkIndex);
+                                String swk = string.substring(swkIndex + 19, endIndex);
+
+                                String acceptKey = generateAcceptKey(swk);
+
+                                String response = "HTTP/1.1 101 Switching Protocols\r\n" +
+                                        "Upgrade: websocket\r\n" +
+                                        "Connection: Upgrade\r\n" +
+                                        "Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
+                                channel.write(ByteBuffer.wrap(response.getBytes()));
+
+                                ClientInfo clientInfo = new ClientInfo(channel);
+                                clientInfoMap.put(channel, clientInfo);
+                            } else {
+                                if (count == -1) {
+                                    handleClientDisconnect(channel);
+                                } else {
                                     String message = messageEncodeDecodeService.decodeMessage(buffer);
-                                    buffer.clear();
-
-                                    // Здесь выполняем обработку сообщения
-                                    gameLogic.handleMessage(message, client, clientInfo);
-                                } catch (IOException e) {
-                                    System.out.println("Error");
-                                    e.printStackTrace();
-                                    handleClientDisconnect(client);
+                                    ClientInfo clientInfo = clientInfoMap.get(channel);
+                                    gameLogic.handleMessage(message, channel, clientInfo);
                                 }
                             }
+                            iterator.remove();
                         }
-                        iterator.remove();
                     }
                 }
             } catch (IOException e) {
-                System.out.println("Error");
+                System.out.println("Error in processing worker events:");
                 e.printStackTrace();
             }
         }
@@ -148,47 +130,17 @@ public class GameServer {
 
     private void handleClientDisconnect(SocketChannel client) {
         try {
-            System.out.println("Client disconnect: " + client.getRemoteAddress());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-
-        ClientInfo clientInfo = clientInfoMap.remove(client);
-        if (clientInfo.getPlayerId() != null) {
-            gameLogic.removePlayer(clientInfo.getPlayerId());
-        }
-        System.out.println("Client removed " + clientInfoMap.size());
-        if (clientInfo != null) {
-            clientInfo.setActive(false);
-            // Дополнительная логика отключения, если нужно
-        }
-        try {
-            client.close();
+            if (client != null && client.isOpen()) {
+                System.out.println("Client disconnect: " + client.getRemoteAddress());
+                ClientInfo clientInfo = clientInfoMap.remove(client);
+                if (clientInfo != null && clientInfo.getPlayerId() != null) {
+                    gameLogic.removePlayer(clientInfo.getPlayerId());
+                }
+                client.close(); // Закрываем канал
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
-    }
-
-    private void handleHandshake(SocketChannel client, String request) throws IOException {
-        String webSocketKey = extractWebSocketKey(request);
-        String acceptKey = generateAcceptKey(webSocketKey);
-
-        String response = "HTTP/1.1 101 Switching Protocols\r\n" +
-                "Upgrade: websocket\r\n" +
-                "Connection: Upgrade\r\n" +
-                "Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
-
-        client.write(ByteBuffer.wrap(response.getBytes(StandardCharsets.UTF_8)));
-    }
-
-    private String extractWebSocketKey(String request) {
-        String[] headers = request.split("\r\n");
-        for (String header : headers) {
-            if (header.startsWith("Sec-WebSocket-Key:")) {
-                return header.substring(19).trim();
-            }
-        }
-        return null;
     }
 
     private String generateAcceptKey(String key) {
@@ -198,22 +150,7 @@ public class GameServer {
             byte[] hash = digest.digest(combined.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(hash);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Error generating WebSocket accept key", e);
         }
-    }
-
-    private String readHttpRequest(SocketChannel client) throws IOException {
-        ByteBuffer buffer = ByteBuffer.allocate(1024);
-        StringBuilder request = new StringBuilder();
-        int bytesRead;
-
-        while ((bytesRead = client.read(buffer)) > 0) {
-            request.append(new String(buffer.array(), 0, bytesRead));
-            buffer.clear();
-            if (request.toString().contains("\r\n\r\n")) {
-                break;
-            }
-        }
-        return request.toString();
     }
 }

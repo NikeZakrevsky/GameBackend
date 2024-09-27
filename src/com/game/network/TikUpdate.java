@@ -15,12 +15,11 @@ public class TikUpdate implements Runnable {
     private final Map<SocketChannel, ClientInfo> clients; // Поле для клиентов
 
     public TikUpdate(Map<SocketChannel, ClientInfo> clients) {
-        this.clients = clients; // Передаем клиентов через конструктор
+        this.clients = clients;
     }
 
     @Override
     public void run() {
-        //System.out.println("TikUpdate started");
         PlayersMessage playersMessage = new PlayersMessage(GameState.getInstance().getPlayers().values());
 
         try {
@@ -30,20 +29,18 @@ public class TikUpdate implements Runnable {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        //System.out.println("TikUpdate finished");
     }
 
     private void broadcast(String message) {
-
         for (SocketChannel client : clients.keySet()) {
             ByteBuffer byteBuffer = messageEncodeDecodeService.encodeMessage(message);
             if (client.isOpen()) {
                 try {
-                    // Отправляем данные в канал
-                    while (byteBuffer.hasRemaining()) {
+                    while (byteBuffer.hasRemaining() && client.isConnected() && client.isOpen()) {
                         client.write(byteBuffer);
                     }
                 } catch (IOException e) {
+                    clients.remove(client);
                     e.printStackTrace();
                 }
             }
