@@ -1,27 +1,32 @@
 package com.game.state;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class Player {
     private String playerId;
-    private int x;
-    private int y;
+    private double x;
+    private double y;
+    private double lookDirection;
+    private List<Bullet> bullets = new ArrayList<>();
 
     public Player(String playerId) {
         this.playerId = playerId;
     }
 
-    public int getX() {
+    public double getX() {
         return x;
     }
 
-    public void setX(int x) {
+    public void setX(double x) {
         this.x = x;
     }
 
-    public int getY() {
+    public double getY() {
         return y;
     }
 
-    public void setY(int y) {
+    public void setY(double y) {
         this.y = y;
     }
 
@@ -31,5 +36,17 @@ public class Player {
 
     public void setPlayerId(String playerId) {
         this.playerId = playerId;
+    }
+
+    public List<Bullet> getBullets() {
+        return bullets;
+    }
+
+    public double getLookDirection() {
+        return lookDirection;
+    }
+
+    public void setLookDirection(double lookDirection) {
+        this.lookDirection = lookDirection;
     }
 }

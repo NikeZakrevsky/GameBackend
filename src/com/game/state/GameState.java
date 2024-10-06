@@ -1,15 +1,49 @@
 package com.game.state;
 
-import java.util.Map;
+import java.util.*;
 
 import java.util.concurrent.ConcurrentHashMap;
 
 public class GameState {
     // Use ConcurrentHashMap for thread-safe access to players
-    private Map<String, Player> players = new ConcurrentHashMap<>();
+    private final Map<String, Player> players = new ConcurrentHashMap<>();
+    private final List<Tree> trees = new ArrayList<>();
+
+    private final Random random = new Random();
 
     // Private constructor to prevent external instantiation
-    private GameState() {}
+    private GameState() {
+        generateRandomTrees(50);
+    }
+
+    private void generateRandomTrees(int count) {
+        for (int i = 0; i < count; i++) {
+            double x = random.nextDouble() * 2000;
+            double y = random.nextDouble() * 2000;
+            trees.add(new Tree(x, y));
+        }
+    }
+
+    public void addBullet(Player player, Bullet bullet) {
+        player.getBullets().add(bullet);
+    }
+
+    public void updateState() {
+        for (Player player : players.values()) {
+            Iterator<Bullet> bulletIterator = player.getBullets().iterator();
+
+            while (bulletIterator.hasNext()) {
+                Bullet bullet = bulletIterator.next();
+                bullet.update();
+
+                if (bullet.getX() < 0 || bullet.getX() > 2000 || bullet.getY() < 0 || bullet.getY() > 2000) {
+                    System.out.println("Remove " + bullet);
+                    bulletIterator.remove();
+                }
+            }
+        }
+    }
+
 
     // Static inner class to hold the singleton instance of GameState
     private static class GameStateHolder {
@@ -21,30 +55,27 @@ public class GameState {
         return GameStateHolder.INSTANCE;
     }
 
-    // Add a player to the game state
-    public String addPlayer(String playerId) {
+    public void addPlayer(String playerId) {
         players.put(playerId, new Player(playerId));
-
-        return playerId;
     }
 
-    // Get a player from the game state
     public Player getPlayer(String playerId) {
         return players.get(playerId);
     }
 
-    // Remove a player from the game state
     public void removePlayer(String playerId) {
         players.remove(playerId);
     }
 
-    // Modify player (e.g. update position)
     public void updatePlayer(String playerId, Player newPlayerData) {
         players.put(playerId, newPlayerData);
     }
 
-    // Get the current state of all players
     public Map<String, Player> getPlayers() {
         return players;
+    }
+
+    public List<Tree> getTrees() {
+        return trees;
     }
 }

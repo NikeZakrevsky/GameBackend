@@ -1,55 +1,95 @@
 package com.game.logic;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.game.network.ClientInfo;
+import com.game.network.GameServer;
+import com.game.network.MapMessage;
+import com.game.network.MessagingService;
+import com.game.state.Bullet;
 import com.game.state.GameState;
 import com.game.state.Player;
 
-import java.nio.channels.SocketChannel;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Optional;
 
 public class GameLogic {
-
     private final GameState gameState = GameState.getInstance();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public String handleMessage(String message, SocketChannel client, ClientInfo clientInfo) {
-        Pattern movePattern = Pattern.compile("MOVE;id:([\\w-]+);x:(\\d+),y:(\\d+)");
-        Pattern newPlayerPattern = Pattern.compile("NEW_PLAYER;id:([\\w-]+)");
+    public void handleMessage(String message, ClientInfo clientInfo) {
+        JsonNode jsonMessage = parseMessage(message);
 
-        Matcher moveMatcher = movePattern.matcher(message.trim());
-        Matcher newPlayerMatcher = newPlayerPattern.matcher(message.trim());
-
-        // Обработка команды MOVE
-        if (moveMatcher.matches()) {
-            String playerId = moveMatcher.group(1);
-            int x = Integer.parseInt(moveMatcher.group(2));
-            int y = Integer.parseInt(moveMatcher.group(3));
-
-            Player player = gameState.getPlayer(playerId);
-            if (player != null) {
-                player.setX(x);
-                player.setY(y);
-                gameState.updatePlayer(playerId, player);
-                //System.out.println("Player " + playerId + " moved to x: " + x + ", y: " + y);
-            } else {
-                System.out.println("Player not found: " + playerId);
-            }
+        switch (jsonMessage.get("event").asText()) {
+            case "SHOOT":
+                processPlayerShoot(jsonMessage);
+                break;
+            case "NEW_PLAYER":
+                processNewPlayer(jsonMessage, clientInfo);
+                break;
+            case "MOVE":
+                processPlayerMovement(jsonMessage);
+                break;
+            default:
+                System.out.println("Can not parse the message");
         }
-        // Обработка команды NEW_PLAYER
-        else if (newPlayerMatcher.matches()) {
-            String playerId = newPlayerMatcher.group(1);
-            clientInfo.setPlayerId(playerId);
-            return gameState.addPlayer(playerId);
-        }
-        else {
-            // Сообщение не соответствует ни MOVE, ни NEW_PLAYER
-            System.out.println("No match found for the message: " + message);
-        }
-
-        return null;
     }
 
     public void removePlayer(String playerId) {
         gameState.removePlayer(playerId);
+    }
+
+    private JsonNode parseMessage(String message) {
+        try {
+            return objectMapper.readTree(message);
+        } catch (JsonProcessingException e) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private void processPlayerMovement(JsonNode message) {
+        String playerId = message.get("playerId").asText();
+        double x = message.get("position").get("x").asDouble();
+        double y = message.get("position").get("y").asDouble();
+        double lookDirection = message.get("lookDirection").asDouble();
+
+        Player player = gameState.getPlayer(playerId);
+        player.setX(x);
+        player.setY(y);
+        player.setLookDirection(lookDirection);
+
+        gameState.updatePlayer(playerId, player);
+    }
+
+    private void processPlayerShoot(JsonNode message) {
+        String playerId = message.get("playerId").asText();
+        double x = message.get("position").get("x").asDouble();
+        double y = message.get("position").get("y").asDouble();
+        double angle = message.get("angle").asDouble();
+
+        Bullet bullet = new Bullet(x, y, angle);
+        Player player = gameState.getPlayer(playerId);
+
+        gameState.addBullet(player, bullet);
+    }
+
+    private void processNewPlayer(JsonNode message, ClientInfo clientInfo) {
+        String playerId = message.get("playerId").asText();
+
+        gameState.addPlayer(playerId);
+
+        sendMap(clientInfo);
+    }
+
+    private void sendMap(ClientInfo clientInfo) {
+        MapMessage mapMessage = new MapMessage(gameState.getTrees());
+        try {
+            String message = objectMapper.writeValueAsString(mapMessage);
+
+            MessagingService.sendMessage(clientInfo.getChannel(), message);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+
     }
 }

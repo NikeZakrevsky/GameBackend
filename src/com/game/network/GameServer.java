@@ -4,6 +4,7 @@ import com.game.logic.GameLogic;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +14,9 @@ import java.util.concurrent.*;
 import java.util.Base64;
 
 public class GameServer {
+
+    public static final Map<SocketChannel, ClientInfo> clientInfoMap = new ConcurrentHashMap<>();
+
     private static final String MAGIC_NUMBER = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private final Selector bossSelector;
     private final Selector workerSelector;
@@ -21,7 +25,6 @@ public class GameServer {
     private final GameLogic gameLogic;
     private final MessageEncodeDecodeService messageEncodeDecodeService;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-    private final Map<SocketChannel, ClientInfo> clientInfoMap = new ConcurrentHashMap<>();
 
     public GameServer(int port) throws IOException {
         bossSelector = Selector.open();
@@ -46,10 +49,9 @@ public class GameServer {
     }
 
     private void startTikUpdate() {
-        scheduler.scheduleAtFixedRate(new TikUpdate(clientInfoMap), 0, 16, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(new TikUpdate(), 0, 50, TimeUnit.MILLISECONDS);
     }
 
-    // Поток для принятия соединений
     private void acceptConnections() {
         while (true) {
             try {
@@ -63,6 +65,7 @@ public class GameServer {
                             SocketChannel channel = serverSocketChannel.accept();
                             if (channel != null) {
                                 channel.configureBlocking(false);
+                                channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
                                 channel.register(workerSelector, SelectionKey.OP_READ);
                                 workerSelector.wakeup();
                             }
@@ -115,9 +118,8 @@ public class GameServer {
                                 } else {
                                     try {
                                         String message = messageEncodeDecodeService.decodeMessage(buffer);
-                                        System.out.println(message);
                                         ClientInfo clientInfo = clientInfoMap.get(channel);
-                                        gameLogic.handleMessage(message, channel, clientInfo);
+                                        gameLogic.handleMessage(message, clientInfo);
                                     } catch (Exception e) {
                                         System.out.println("Can not decode");
                                     }
